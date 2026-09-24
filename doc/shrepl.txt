@@ -34,6 +34,16 @@ Works in any buffer: a shell script, a Markdown runbook, a scratch buffer.
 <
 The commands in |shrepl-commands| work without calling setup().
 
+                                                              *shrepl-confirm*
+confirm   Before running, every logical line (`\` continuations joined) is
+          lowercased and checked against `confirm.patterns` (defaults in
+          `require('shrepl').default_confirm`) plus `confirm.add`. Entries are
+          Lua patterns or functions `fn(line) -> bool`. A hit shows the line
+          and asks; Cancel marks it `⊘ not run`. `patterns` replaces the
+          defaults, `add` extends them, `confirm = false` disables the check.
+          It is a guardrail for runbooks, not a sandbox: variables, aliases
+          and scripts can still do anything.
+
 ==============================================================================
 3. MAPPINGS                                                 *shrepl-mappings*
 

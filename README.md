@@ -32,6 +32,13 @@ A broken command only breaks itself. An unclosed quote or a syntax error fails t
 eval and the shell carries on. If something hangs, `<localleader>ei` interrupts it and
 your variables survive.
 
+Commands that look like they change things ask first: `rm`, `aws … delete-*/put-*/create-*`
+and friends, `aws s3 rm/sync/mv` or a `cp` to `s3://`, `kubectl delete/apply`,
+`terraform apply/destroy`, `git push --force`, `git reset --hard`, `DROP TABLE`,
+`DELETE FROM`, `dd … of=`. It's pattern matching on the text you evaluate, so it catches
+the typo'd line in a runbook, not a script that deletes things on its own. Add your own
+with `confirm = { add = { '%f[%w]deploy%.sh' } }`, or turn it off with `confirm = false`.
+
 Pagers are switched off (`PAGER`, `GIT_PAGER` and `AWS_PAGER`), because a command waiting
 for you to press `q` in an invisible pager just looks like a hang.
 
@@ -99,6 +106,7 @@ require('shrepl').setup({
   env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb', NO_COLOR = '1' },
   float = { max_height = 20, max_width = 140, border = 'rounded' },
   log = { split = 'botright 15split', vsplit = 'botright vsplit' },
+  confirm = { add = {} }, -- or { patterns = { ... } } to replace the defaults, or false
 })
 ```
 

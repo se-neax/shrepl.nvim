@@ -10,6 +10,10 @@ M.config = {
   env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb', NO_COLOR = '1' },
   float = { max_height = 20, max_width = 140, border = 'rounded' },
   log = { split = 'botright 15split', vsplit = 'botright vsplit' },
+  -- A guardrail, not a sandbox: each entry is a Lua pattern or a function(line) -> bool,
+  -- tried on every logical line (\ continuations joined, lowercased). A hit asks first.
+  -- `patterns` replaces the list, `add` extends it, `confirm = false` turns it off.
+  confirm = { add = {}, patterns = {} },
   mappings = {
     eval_command = '<localleader>ee',
     eval_block = '<localleader>er',
@@ -141,11 +145,74 @@ end
 --- spaces per line (fenced blocks inside Markdown lists). Code travels base64 through
 --- eval, so a syntax error or unclosed quote can't swallow the end marker, and
 --- </dev/null stops commands from reading the plugin's own input.
+-- tool + verb anywhere later on the line, so global flags (-n prod, -chdir=x, --profile p)
+-- can't hide the verb
+local function verbs(tool, list)
+  return vim.tbl_map(function(v) return '%f[%w]' .. tool .. '%f[%W].-%f[%w]' .. v end, list)
+end
+
+-- aws s3 cp: a write when any positional after the source is an s3:// URL
+local function s3_cp_upload(l)
+  local args = l:match('%f[%w]aws%f[%W].-%f[%w]s3%s+cp%s+(.*)')
+  if not args then return false end
+  local pos = {}
+  for tok in args:gmatch('%S+') do
+    tok = tok:gsub('[\'"]', '')
+    if not tok:match('^%-') then table.insert(pos, tok) end
+  end
+  for i = 2, #pos do if pos[i]:match('^s3://') then return true end end
+  return false
+end
+
+M.default_confirm = vim.iter({
+  { '%f[%w]rm%s', '%f[%w]rmdir%s', '%f[%w]dd%f[%W].-%f[%w]of=', '%f[%w]mkfs', '%f[%w]shutdown%f[%W]', '%f[%w]reboot%f[%W]',
+    '%f[%w]drop%s+table', '%f[%w]drop%s+database', '%f[%w]truncate%s', '%f[%w]delete%s+from%f[%W]', s3_cp_upload },
+  verbs('aws', { 's3%s+rm%f[%W]', 's3%s+rb%f[%W]', 's3%s+mv%f[%W]', 's3%s+sync%f[%W]', 'delete', 'put%-', 'create',
+    'update', 'modify', 'terminate', 'remove', 'stop%-', 'reboot', 'invoke', 'run%-' }),
+  verbs('kubectl', { 'delete', 'apply', 'replace', 'patch', 'scale', 'drain', 'rollout%s+restart' }),
+  verbs('helm', { 'uninstall', 'upgrade', 'rollback' }),
+  verbs('terraform', { 'apply', 'destroy', 'state%s+rm', 'import' }),
+  verbs('git', { 'push%f[%W].-%-%-force', 'push%f[%W].-%s%-%a*f', 'reset%f[%W].-%-%-hard',
+    'clean%f[%W].-%s%-%a*f', 'clean%f[%W].-%-%-force' }),
+  verbs('docker', { 'system%s+prune', 'volume%s+rm', 'rm%f[%W]', 'rmi%f[%W]' }),
+  verbs('systemctl', { 'stop', 'disable', 'restart' }),
+}):flatten():totable()
+M.config.confirm.patterns = M.default_confirm
+
+local function logical_lines(lines)
+  local out, cur = {}, ''
+  for _, l in ipairs(lines) do
+    if l:match('\\%s*$') then cur = cur .. (l:gsub('\\%s*$', ' '))
+    else table.insert(out, cur .. l); cur = '' end
+  end
+  if cur ~= '' then table.insert(out, cur) end
+  return out
+end
+
+--- First logical line of `lines` matching a confirm pattern, or nil.
+function M.needs_confirm(lines)
+  local c = M.config.confirm
+  if not c then return end
+  local checks = vim.list_extend(vim.list_extend({}, c.patterns or {}), c.add or {})
+  for _, l in ipairs(logical_lines(lines)) do
+    local low = l:lower()
+    for _, p in ipairs(checks) do
+      if (type(p) == 'function' and p(low)) or (type(p) == 'string' and low:match(p)) then return vim.trim(l) end
+    end
+  end
+end
+
 function M.eval(buf, s, e, dedent)
   buf = buf == 0 and api.nvim_get_current_buf() or buf
   local lines = api.nvim_buf_get_lines(buf, s, e + 1, false)
   if (dedent or 0) > 0 then
     for i, l in ipairs(lines) do lines[i] = l:sub(math.min(#l:match('^ *'), dedent) + 1) end
+  end
+  local hit = M.needs_confirm(lines)
+  if hit and vim.fn.confirm('shrepl: this looks like it changes things:\n\n  ' .. hit .. '\n\nRun it?', '&Run\n&Cancel', 2, 'Warning') ~= 1 then
+    api.nvim_buf_clear_namespace(buf, ns, s, e + 1)
+    mark({ buf = buf, last = e }, '⊘ not run', 'DiagnosticWarn')
+    return
   end
   ensure()
   local ev = { buf = buf, last = e, code = lines, out = {}, blanks = 0, t0 = vim.uv.hrtime() }
@@ -238,7 +305,14 @@ function M.open_last()
 end
 
 function M.setup(opts)
-  M.config = vim.tbl_deep_extend('force', M.config, opts or {})
+  opts = opts or {}
+  M.config = vim.tbl_deep_extend('force', M.config, opts)
+  -- lists replace instead of merging index by index
+  if type(opts.confirm) == 'table' then
+    for _, k in ipairs({ 'patterns', 'add' }) do
+      if opts.confirm[k] then M.config.confirm[k] = opts.confirm[k] end
+    end
+  end
   local m = M.config.mappings
   local function map(mode, lhs, fn, desc)
     if lhs then vim.keymap.set(mode, lhs, fn, { desc = 'shrepl: ' .. desc }) end
