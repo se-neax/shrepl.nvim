@@ -12,7 +12,7 @@ CONTENTS                                                    *shrepl-contents*
 ==============================================================================
 1. INTRO                                                       *shrepl-intro*
 
-shrepl keeps one bash process alive per Neovim session and sends it the
+shrepl keeps one shell process alive per Neovim session and sends it the
 command under your cursor. Variables, functions and the working directory
 survive between evaluations. The result appears at the end of the evaluated
 line (`=> output`, or `✗ <exit code>` in red), longer output opens in a
@@ -25,7 +25,8 @@ Works in any buffer: a shell script, a Markdown runbook, a scratch buffer.
 
 >lua
   require('shrepl').setup({
-    shell = { 'bash', '--norc', '--noprofile' },
+    shell = 'bash',   -- 'zsh', 'auto' ($SHELL if bash or zsh), or argv list
+    rc = false,       -- source ~/.bashrc or ${ZDOTDIR:-~}/.zshrc at start
     env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb' },
     float = { max_height = 20, max_width = 140, border = 'rounded' },
     signs = { running = '·', ok = '✓', fail = '✗' }, -- or false
@@ -85,8 +86,10 @@ block.
 
 - stdin is /dev/null, so interactive programs (prompts, less, top) won't
   work. Use |:terminal| for those.
-- The shell starts with --norc: your aliases aren't there, PATH and the
-  environment are inherited from Neovim.
+- The shell starts without rc files (bash --norc, zsh -f) unless rc = true.
+  PATH and the environment are inherited from Neovim. Many ~/.bashrc files
+  return early in non-interactive shells, so rc = true helps most with zsh.
+- bash and zsh only.
 - Output is collected line by line; carriage-return progress bars show up
   once they print a newline.
 

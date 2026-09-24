@@ -7,7 +7,8 @@ local ns = api.nvim_create_namespace('shrepl')
 local sign_ns = api.nvim_create_namespace('shrepl_signs') -- survives clear(), so you can see what already ran
 
 M.config = {
-  shell = { 'bash', '--norc', '--noprofile' },
+  shell = 'bash', -- 'bash', 'zsh', 'auto' ($SHELL when it is bash or zsh), or an argv list
+  rc = false,     -- source ~/.bashrc or ${ZDOTDIR:-~}/.zshrc at start, for aliases and functions
   env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb', NO_COLOR = '1' },
   float = { max_height = 20, max_width = 140, border = 'rounded' },
   signs = { running = '·', ok = '✓', fail = '✗' }, -- sign column per evaluated line; false = off
@@ -37,7 +38,7 @@ local function log()
     log_buf = api.nvim_create_buf(false, true)
     api.nvim_buf_set_name(log_buf, 'shrepl-log')
     vim.bo[log_buf].filetype = 'sh'
-    api.nvim_buf_set_lines(log_buf, 0, -1, false, { '# shrepl log (one persistent bash)' })
+    api.nvim_buf_set_lines(log_buf, 0, -1, false, { '# shrepl log (one persistent shell)' })
   end
   return log_buf
 end
@@ -69,7 +70,7 @@ end
 local sign_hl = { running = 'Comment', ok = 'DiagnosticOk', fail = 'DiagnosticError' }
 local function sign(e, state)
   local cfg = M.config.signs
-  if not cfg or e.stale then return end
+  if not cfg or e.stale or not e.buf then return end
   e.signs = e.signs or {}
   for i = e.first, e.last do
     pcall(function()
@@ -118,6 +119,7 @@ local function finish(rc)
   header(e)
   e.blanks = 0 -- trailing blank lines (incl. the sentinel printf's \n) are dropped
   append({ ('# => exit %d  (%.1fs)'):format(rc, (vim.uv.hrtime() - e.t0) / 1e9), '' })
+  if e.internal then return end
   last = e.out
   local more = #e.out > 1 and ('  …+%d'):format(#e.out - 1) or ''
   sign(e, rc == 0 and 'ok' or 'fail')
@@ -144,10 +146,32 @@ local function on_out(_, data)
   end
 end
 
+local shells = {
+  bash = { argv = { 'bash', '--norc', '--noprofile' }, rc = 'shopt -s expand_aliases; [ -f ~/.bashrc ] && . ~/.bashrc' },
+  zsh = { argv = { 'zsh', '-f' }, rc = '[ -f "${ZDOTDIR:-$HOME}/.zshrc" ] && . "${ZDOTDIR:-$HOME}/.zshrc"' },
+}
+
+-- argv and rc snippet for config.shell
+local function shell_cmd()
+  local sh = M.config.shell
+  if sh == 'auto' then
+    sh = vim.fs.basename(vim.env.SHELL or '')
+    if not shells[sh] then sh = 'bash' end
+  end
+  if type(sh) == 'string' then
+    assert(shells[sh], 'shrepl: unknown shell ' .. sh .. " (use 'bash', 'zsh', 'auto' or an argv list)")
+    return shells[sh].argv, shells[sh].rc
+  end
+  local known = shells[vim.fs.basename(sh[1])]
+  return sh, known and known.rc
+end
+
+local dispatch
 local function ensure()
   if job then return end
   partial = ''
-  job = vim.fn.jobstart(M.config.shell, {
+  local argv, rc = shell_cmd()
+  job = vim.fn.jobstart(argv, {
     env = M.config.env,
     on_stdout = on_out,
     on_stderr = function(_, d) append(vim.tbl_filter(function(l) return l ~= '' end, d)) end,
@@ -157,6 +181,18 @@ local function ensure()
       append({ '# shell exited, next eval starts a fresh one', '' })
     end),
   })
+  if M.config.rc and rc then
+    local ev = { code = { rc }, out = {}, blanks = 0, t0 = vim.uv.hrtime(), internal = true }
+    table.insert(queue, ev)
+    header(ev)
+    dispatch(ev)
+  end
+end
+
+-- the base64 wrapper works unchanged in bash and zsh
+function dispatch(ev)
+  local wrap = [[eval "$(printf %s CODE | base64 -d)" </dev/null 2>&1; printf '\n__SHREPL_DONE__ %d\n' $?]]
+  vim.fn.chansend(job, wrap:gsub('CODE', vim.base64.encode(table.concat(ev.code, '\n')), 1) .. '\n')
 end
 
 --- Evaluate rows s..e (0-based, inclusive) of `buf`, removing up to `dedent` leading
@@ -244,8 +280,7 @@ function M.eval(buf, s, e, dedent)
   sign(ev, 'running')
   table.insert(queue, ev)
   if #queue == 1 then header(ev) end
-  local wrap = [[eval "$(printf %s CODE | base64 -d)" </dev/null 2>&1; printf '\n__SHREPL_DONE__ %d\n' $?]]
-  vim.fn.chansend(job, wrap:gsub('CODE', vim.base64.encode(table.concat(lines, '\n')), 1) .. '\n')
+  dispatch(ev)
 end
 
 local function line(i) return api.nvim_buf_get_lines(0, i, i + 1, false)[1] end
@@ -344,6 +379,7 @@ function M.setup(opts)
   opts = opts or {}
   M.config = vim.tbl_deep_extend('force', M.config, opts)
   -- lists replace instead of merging index by index
+  if opts.shell then M.config.shell = opts.shell end
   if type(opts.confirm) == 'table' then
     for _, k in ipairs({ 'patterns', 'add' }) do
       if opts.confirm[k] then M.config.confirm[k] = opts.confirm[k] end

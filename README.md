@@ -55,7 +55,7 @@ block, blank lines included. That happens when the fence is marked `sh`, `bash`,
 
 ## Install
 
-Requires Neovim 0.10+, `bash`, `base64` and `pkill` (coreutils and procps, present on
+Requires Neovim 0.10+, `bash` (or `zsh`), `base64` and `pkill` (coreutils and procps, present on
 most systems).
 
 lazy.nvim:
@@ -108,7 +108,8 @@ Defaults:
 
 ```lua
 require('shrepl').setup({
-  shell = { 'bash', '--norc', '--noprofile' },
+  shell = 'bash', -- 'zsh', 'auto' ($SHELL if bash/zsh), or an argv list
+  rc = false,     -- true: source ~/.bashrc / ~/.zshrc at start (aliases, functions)
   env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb', NO_COLOR = '1' },
   float = { max_height = 20, max_width = 140, border = 'rounded' },
   signs = { running = '·', ok = '✓', fail = '✗' }, -- or false
@@ -117,11 +118,14 @@ require('shrepl').setup({
 })
 ```
 
-Drop `--norc` from `shell` if you want your aliases.
+`shell = 'zsh', rc = true` gets you your aliases and functions from `~/.zshrc`. The rc
+file is sourced once when the shell starts and shows up in the log like any other eval.
+bash works the same way, but many `~/.bashrc` files return early when the shell isn't
+interactive, so the aliases may never get defined.
 
 ## How it works
 
-One `bash` runs as a Neovim job with plain pipes, no terminal. Each eval is sent as
+One shell (bash by default) runs as a Neovim job with plain pipes, no terminal. Each eval is sent as
 
 ```sh
 eval "$(printf %s <base64 of your code> | base64 -d)" </dev/null 2>&1
@@ -140,7 +144,7 @@ waiting.
   `:terminal` for those.
 - Output arrives line by line, so a progress bar that redraws with `\r` shows up only
   once it prints a newline.
-- It only speaks bash for now.
+- bash and zsh only. fish uses different syntax for the wrapper and isn't supported.
 
 ## Related
 
