@@ -28,6 +28,7 @@ Works in any buffer: a shell script, a Markdown runbook, a scratch buffer.
     shell = { 'bash', '--norc', '--noprofile' },
     env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb' },
     float = { max_height = 20, max_width = 140, border = 'rounded' },
+    signs = { running = '·', ok = '✓', fail = '✗' }, -- or false
     log = { split = 'botright 15split', vsplit = 'botright vsplit' },
     mappings = { eval_command = '<localleader>ee' }, -- see below; false disables
   })
@@ -76,7 +77,8 @@ block.
   :ShreplLast           open the last result in a scratch split
   :ShreplInterrupt      SIGINT the running command
   :ShreplRestart        restart the shell
-  :ShreplClear          clear inline results in the current buffer
+  :ShreplClear[!]       clear inline results in the current buffer; with !
+                        also the ✓/✗ signs showing which lines already ran
 
 ==============================================================================
 5. CAVEATS                                                   *shrepl-caveats*

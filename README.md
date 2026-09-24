@@ -17,6 +17,11 @@ command.
 
 ## What it does
 
+Every line you run gets a sign in the sign column: `·` while it runs, then `✓` or a red
+`✗`. The signs stay when you clear the inline results and move with the text as you edit,
+so halfway through a runbook you can see which steps you already did. `:ShreplClear!`
+wipes them.
+
 A short result goes inline: `=> first line of output` in a muted color, with `…+N` when
 there's more, or `✗ <exit code>` in red when the command fails. Longer output also opens
 in a float under the command you ran, so it doesn't cover the code, and it closes when you
@@ -95,7 +100,7 @@ require('shrepl').setup({
 ```
 
 The same actions exist as commands, with no setup needed: `:ShreplEval` (takes a range),
-`:ShreplLog`, `:ShreplLast`, `:ShreplInterrupt`, `:ShreplRestart`, `:ShreplClear`.
+`:ShreplLog`, `:ShreplLast`, `:ShreplInterrupt`, `:ShreplRestart`, `:ShreplClear` (`!` also clears the signs).
 
 ## Configuration
 
@@ -106,6 +111,7 @@ require('shrepl').setup({
   shell = { 'bash', '--norc', '--noprofile' },
   env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb', NO_COLOR = '1' },
   float = { max_height = 20, max_width = 140, border = 'rounded' },
+  signs = { running = '·', ok = '✓', fail = '✗' }, -- or false
   log = { split = 'botright 15split', vsplit = 'botright vsplit' },
   confirm = { add = {} }, -- or { patterns = { ... } } to replace the defaults, or false
 })

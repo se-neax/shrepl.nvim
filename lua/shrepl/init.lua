@@ -4,11 +4,13 @@
 local api = vim.api
 local M = {}
 local ns = api.nvim_create_namespace('shrepl')
+local sign_ns = api.nvim_create_namespace('shrepl_signs') -- survives clear(), so you can see what already ran
 
 M.config = {
   shell = { 'bash', '--norc', '--noprofile' },
   env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb', NO_COLOR = '1' },
   float = { max_height = 20, max_width = 140, border = 'rounded' },
+  signs = { running = '·', ok = '✓', fail = '✗' }, -- sign column per evaluated line; false = off
   log = { split = 'botright 15split', vsplit = 'botright vsplit' },
   -- A guardrail, not a sandbox: each entry is a Lua pattern or a function(line) -> bool,
   -- tried on every logical line (\ continuations joined, lowercased). A hit asks first.
@@ -49,6 +51,7 @@ local function append(lines)
 end
 
 local function mark(e, text, hl)
+  if e.stale then return end
   pcall(function()
     local row = e.mark and api.nvim_buf_get_extmark_by_id(e.buf, ns, e.mark, {})[1] or e.last
     e.mark = api.nvim_buf_set_extmark(e.buf, ns, row, 0, { id = e.mark, virt_text = { { text, hl } } })
@@ -63,6 +66,20 @@ local function open_last_hint()
 end
 
 -- float anchored under the last evaluated line, so it never hides the code or its result
+local sign_hl = { running = 'Comment', ok = 'DiagnosticOk', fail = 'DiagnosticError' }
+local function sign(e, state)
+  local cfg = M.config.signs
+  if not cfg or e.stale then return end
+  e.signs = e.signs or {}
+  for i = e.first, e.last do
+    pcall(function()
+      local id = e.signs[i]
+      local row = id and api.nvim_buf_get_extmark_by_id(e.buf, sign_ns, id, {})[1] or i
+      e.signs[i] = api.nvim_buf_set_extmark(e.buf, sign_ns, row, 0, { id = id, sign_text = cfg[state], sign_hl_group = sign_hl[state] })
+    end)
+  end
+end
+
 local function float(lines, row)
   local cfg = M.config.float
   local title = (' %d lines · all: %s '):format(#lines, open_last_hint())
@@ -103,6 +120,7 @@ local function finish(rc)
   append({ ('# => exit %d  (%.1fs)'):format(rc, (vim.uv.hrtime() - e.t0) / 1e9), '' })
   last = e.out
   local more = #e.out > 1 and ('  …+%d'):format(#e.out - 1) or ''
+  sign(e, rc == 0 and 'ok' or 'fail')
   if rc == 0 then mark(e, '=> ' .. (e.out[1] or '') .. more, 'Comment')
   else mark(e, ('✗ %d  %s%s'):format(rc, e.out[1] or '', more), 'DiagnosticError') end
   if #e.out > 1 and api.nvim_get_current_buf() == e.buf and #vim.fn.win_findbuf(log()) == 0 then
@@ -134,7 +152,7 @@ local function ensure()
     on_stdout = on_out,
     on_stderr = function(_, d) append(vim.tbl_filter(function(l) return l ~= '' end, d)) end,
     on_exit = vim.schedule_wrap(function()
-      for _, e in ipairs(queue) do mark(e, '✗ shell exited', 'DiagnosticError') end
+      for _, e in ipairs(queue) do mark(e, '✗ shell exited', 'DiagnosticError'); sign(e, 'fail') end
       queue, job = {}, nil
       append({ '# shell exited, next eval starts a fresh one', '' })
     end),
@@ -215,9 +233,15 @@ function M.eval(buf, s, e, dedent)
     return
   end
   ensure()
-  local ev = { buf = buf, last = e, code = lines, out = {}, blanks = 0, t0 = vim.uv.hrtime() }
+  local ev = { buf = buf, first = s, last = e, code = lines, out = {}, blanks = 0, t0 = vim.uv.hrtime() }
+  -- a queued eval on the same lines no longer owns their marks
+  for _, q in ipairs(queue) do
+    if q.buf == buf and q.first <= e and s <= q.last then q.stale = true end
+  end
   api.nvim_buf_clear_namespace(buf, ns, s, e + 1)
+  api.nvim_buf_clear_namespace(buf, sign_ns, s, e + 1)
   mark(ev, '… running', 'Comment')
+  sign(ev, 'running')
   table.insert(queue, ev)
   if #queue == 1 then header(ev) end
   local wrap = [[eval "$(printf %s CODE | base64 -d)" </dev/null 2>&1; printf '\n__SHREPL_DONE__ %d\n' $?]]
@@ -292,7 +316,11 @@ function M.interrupt()
   if job then vim.fn.system({ 'pkill', '-INT', '-P', tostring(vim.fn.jobpid(job)) }) end
 end
 function M.restart() if job then vim.fn.jobstop(job) end end
-function M.clear() api.nvim_buf_clear_namespace(0, ns, 0, -1) end
+--- Clear inline results; with `signs = true` also the ran/failed signs.
+function M.clear(signs)
+  api.nvim_buf_clear_namespace(0, ns, 0, -1)
+  if signs then api.nvim_buf_clear_namespace(0, sign_ns, 0, -1) end
+end
 
 --- Toggle the log window; `cmd` is the split command (default: config.log.split).
 function M.toggle_log(cmd)
