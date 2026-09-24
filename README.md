@@ -1,0 +1,144 @@
+# shrepl.nvim
+
+Evaluate shell commands from any Neovim buffer, the way Conjure evaluates Clojure.
+
+![shrepl.nvim demo](demo/demo.gif)
+
+Put the cursor on a line, press `<localleader>ee`, and the result shows up at the end of
+that line. The shell behind it stays alive between evals. If one line sets `B=my-bucket`,
+`aws s3 ls s3://$B` three lines further down still sees it, and a `cd`, a function or an
+`export` sticks around the same way.
+
+I wrote it for runbooks. I kept a Markdown file of `aws`, `kubectl` and `curl | jq`
+commands and pasted them into a terminal one at a time, and I kept losing track of which
+ones I had already run and what they had printed. Now the answer sits next to each
+command.
+
+## What it does
+
+A short result goes inline: `=> first line of output` in a muted color, with `…+N` when
+there's more, or `✗ <exit code>` in red when the command fails. Longer output also opens
+in a float under the command you ran, so it doesn't cover the code, and it closes when you
+move the cursor.
+
+For really long output (an `aws ... list-*` call can easily return 16,000 lines),
+`<localleader>eo` opens the last result in a scratch split. JSON gets `filetype=json`, so
+you can fold it, search it, or cut it down with `:%!jq '.Items[].id'`.
+
+Everything also goes to a log (`<localleader>ls`): each eval's code, its full output, the
+exit code and how long it took, in the order you ran them. The log never truncates.
+
+A broken command only breaks itself. An unclosed quote or a syntax error fails that one
+eval and the shell carries on. If something hangs, `<localleader>ei` interrupts it and
+your variables survive.
+
+Pagers are switched off (`PAGER`, `GIT_PAGER` and `AWS_PAGER`), because a command waiting
+for you to press `q` in an invisible pager just looks like a hang.
+
+It works in any buffer, whatever the filetype.
+
+## Install
+
+Requires Neovim 0.10+, `bash`, `base64` and `pkill` (coreutils and procps, present on
+most systems).
+
+lazy.nvim:
+
+```lua
+{ 'se-neax/shrepl.nvim', opts = {} }
+```
+
+packer.nvim:
+
+```lua
+use { 'se-neax/shrepl.nvim', config = function() require('shrepl').setup() end }
+```
+
+## Keys
+
+| Key               | Action                                                  |
+|-------------------|---------------------------------------------------------|
+| `<localleader>ee` | Eval the current command, following `\` continuations   |
+| `<localleader>er` | Eval the block around the cursor (up to blank lines)    |
+| `<localleader>eb` | Eval the whole buffer                                   |
+| `<localleader>E`  | Eval the visual selection                               |
+| `<localleader>eo` | Open the last result in a scratch split                 |
+| `<localleader>ls` | Toggle the log in a horizontal split                    |
+| `<localleader>lv` | Toggle the log in a vertical split                      |
+| `<localleader>ei` | Interrupt the running command                           |
+| `<localleader>eR` | Restart the shell                                       |
+| `<localleader>ec` | Clear inline results                                    |
+
+If you already use Conjure, these match its keys. In buffers where Conjure is active, its
+buffer-local mappings win.
+
+Every mapping can be changed or turned off:
+
+```lua
+require('shrepl').setup({
+  mappings = {
+    eval_command = '<leader>r', -- any lhs
+    eval_buffer = false,        -- disabled
+  },
+})
+```
+
+The same actions exist as commands, with no setup needed: `:ShreplEval` (takes a range),
+`:ShreplLog`, `:ShreplLast`, `:ShreplInterrupt`, `:ShreplRestart`, `:ShreplClear`.
+
+## Configuration
+
+Defaults:
+
+```lua
+require('shrepl').setup({
+  shell = { 'bash', '--norc', '--noprofile' },
+  env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb', NO_COLOR = '1' },
+  float = { max_height = 20, max_width = 140, border = 'rounded' },
+  log = { split = 'botright 15split', vsplit = 'botright vsplit' },
+})
+```
+
+Drop `--norc` from `shell` if you want your aliases.
+
+## How it works
+
+One `bash` runs as a Neovim job with plain pipes, no terminal. Each eval is sent as
+
+```sh
+eval "$(printf %s <base64 of your code> | base64 -d)" </dev/null 2>&1
+printf '\n__SHREPL_DONE__ %d\n' $?
+```
+
+Because the code travels as base64, it can contain any quoting at all, and a syntax error
+stays inside `eval` instead of leaving bash waiting for a closing quote. `</dev/null` stops a command
+from reading the next eval as its input. The marker line tells shrepl where the output
+ends and what the exit code was. Evals queue in order, so you can fire several without
+waiting.
+
+## Limits
+
+- No stdin: prompts, `less`, `top` and other interactive programs won't work. Use
+  `:terminal` for those.
+- Output arrives line by line, so a progress bar that redraws with `\r` shows up only
+  once it prints a newline.
+- It only speaks bash for now.
+
+## Related
+
+- [Conjure](https://github.com/Olical/conjure): the model for this, for Lisps and more.
+- [vim-slime](https://github.com/jpalardy/vim-slime): sends text to a terminal or tmux
+  pane. Better for interactive programs, but results don't come back into the buffer.
+- [Lingnik/shrepl.nvim](https://github.com/Lingnik/shrepl.nvim): an earlier, unrelated
+  plugin with the same name and a similar goal. Both use `require('shrepl')`, so install
+  one or the other.
+
+## Tests
+
+```sh
+nvim --headless -u NONE --cmd 'set rtp^=.' -l tests/smoke.lua
+```
+
+## License
+
+MIT

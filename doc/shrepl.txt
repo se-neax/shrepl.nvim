@@ -1,0 +1,72 @@
+*shrepl.txt*  Conjure-style evaluation for shell commands
+
+==============================================================================
+CONTENTS                                                    *shrepl-contents*
+
+  1. Intro ............................................ |shrepl-intro|
+  2. Setup ............................................ |shrepl-setup|
+  3. Mappings ......................................... |shrepl-mappings|
+  4. Commands ......................................... |shrepl-commands|
+  5. Caveats .......................................... |shrepl-caveats|
+
+==============================================================================
+1. INTRO                                                       *shrepl-intro*
+
+shrepl keeps one bash process alive per Neovim session and sends it the
+command under your cursor. Variables, functions and the working directory
+survive between evaluations. The result appears at the end of the evaluated
+line (`=> output`, or `✗ <exit code>` in red), longer output opens in a
+float, and every evaluation lands in a log buffer.
+
+Works in any buffer: a shell script, a Markdown runbook, a scratch buffer.
+
+==============================================================================
+2. SETUP                                                       *shrepl-setup*
+
+>lua
+  require('shrepl').setup({
+    shell = { 'bash', '--norc', '--noprofile' },
+    env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb' },
+    float = { max_height = 20, max_width = 140, border = 'rounded' },
+    log = { split = 'botright 15split', vsplit = 'botright vsplit' },
+    mappings = { eval_command = '<localleader>ee' }, -- see below; false disables
+  })
+<
+The commands in |shrepl-commands| work without calling setup().
+
+==============================================================================
+3. MAPPINGS                                                 *shrepl-mappings*
+
+  Key                 Option            Action ~
+  <localleader>ee     eval_command      current line, plus `\` continuations
+  <localleader>er     eval_block        lines around cursor up to blank lines
+  <localleader>eb     eval_buffer       whole buffer
+  <localleader>E      eval_selection    visual selection
+  <localleader>eo     open_last         last result in a scratch split
+  <localleader>ls     log_split         toggle log (horizontal)
+  <localleader>lv     log_vsplit        toggle log (vertical)
+  <localleader>ei     interrupt         SIGINT the running command
+  <localleader>eR     restart           kill the shell; next eval starts fresh
+  <localleader>ec     clear             clear inline results
+
+==============================================================================
+4. COMMANDS                                                 *shrepl-commands*
+
+  :[range]ShreplEval    evaluate [range] (default: current line)
+  :ShreplLog            toggle the log window
+  :ShreplLast           open the last result in a scratch split
+  :ShreplInterrupt      SIGINT the running command
+  :ShreplRestart        restart the shell
+  :ShreplClear          clear inline results in the current buffer
+
+==============================================================================
+5. CAVEATS                                                   *shrepl-caveats*
+
+- stdin is /dev/null, so interactive programs (prompts, less, top) won't
+  work. Use |:terminal| for those.
+- The shell starts with --norc: your aliases aren't there, PATH and the
+  environment are inherited from Neovim.
+- Output is collected line by line; carriage-return progress bars show up
+  once they print a newline.
+
+ vim:tw=78:ts=8:ft=help:norl:

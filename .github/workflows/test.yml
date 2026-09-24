@@ -1,0 +1,15 @@
+name: test
+on: [push, pull_request]
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        nvim: [v0.10.4, stable, nightly]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: rhysd/action-setup-vim@v1
+        with:
+          neovim: true
+          version: ${{ matrix.nvim }}
+      - run: nvim --headless -u NONE --cmd 'set rtp^=.' -l tests/smoke.lua
