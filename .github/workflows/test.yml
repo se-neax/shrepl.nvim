@@ -12,4 +12,4 @@ jobs:
         with:
           neovim: true
           version: ${{ matrix.nvim }}
-      - run: nvim --headless -u NONE --cmd 'set rtp^=.' -l tests/smoke.lua
+      - run: for t in tests/*.lua; do nvim --headless -u NONE --cmd 'set rtp^=.' -l "$t" || exit 1; done

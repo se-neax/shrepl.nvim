@@ -137,12 +137,16 @@ local function ensure()
   })
 end
 
---- Evaluate rows s..e (0-based, inclusive) of `buf`. Code travels base64 through
+--- Evaluate rows s..e (0-based, inclusive) of `buf`, removing up to `dedent` leading
+--- spaces per line (fenced blocks inside Markdown lists). Code travels base64 through
 --- eval, so a syntax error or unclosed quote can't swallow the end marker, and
 --- </dev/null stops commands from reading the plugin's own input.
-function M.eval(buf, s, e)
+function M.eval(buf, s, e, dedent)
   buf = buf == 0 and api.nvim_get_current_buf() or buf
   local lines = api.nvim_buf_get_lines(buf, s, e + 1, false)
+  if (dedent or 0) > 0 then
+    for i, l in ipairs(lines) do lines[i] = l:sub(math.min(#l:match('^ *'), dedent) + 1) end
+  end
   ensure()
   local ev = { buf = buf, last = e, code = lines, out = {}, blanks = 0, t0 = vim.uv.hrtime() }
   api.nvim_buf_clear_namespace(buf, ns, s, e + 1)
@@ -162,9 +166,44 @@ local function around(ext) -- grow from the cursor row while ext(row) holds
   return s, e
 end
 
+local shell_langs = { [''] = true, sh = true, bash = true, shell = true, zsh = true, console = true }
+
+-- Markdown fence (``` or ~~~) containing the cursor row, delimiter lines included:
+-- returns the opening and closing rows (0-based; close = line count when unclosed).
+local function fence()
+  local r, lines = api.nvim_win_get_cursor(0)[1] - 1, api.nvim_buf_get_lines(0, 0, -1, false)
+  local open, delim
+  for i, l in ipairs(lines) do
+    local row, f = i - 1, l:match('^%s*(```+)') or l:match('^%s*(~~~+)')
+    if f and not open then
+      open, delim = row, f
+    elseif f and f:sub(1, 1) == delim:sub(1, 1) and #f >= #delim and l:match('^%s*[`~]+%s*$') then
+      if r <= row then return open, row end
+      open = nil
+    end
+    if row >= r and not open then return nil end
+  end
+  if open then return open, #lines end
+end
+
 M.ranges = {
   command = function() return around(function(i) return line(i):match('\\%s*$') end) end,
-  block = function() return around(function(i, dir) return line(dir == 'up' and i or i + 1):match('%S') end) end,
+  block = function()
+    local open, close = fence()
+    if not open then -- blank-line delimited; fence lines count as delimiters too
+      return around(function(i, dir)
+        local l = line(dir == 'up' and i or i + 1)
+        return l:match('%S') and not l:match('^%s*```') and not l:match('^%s*~~~')
+      end)
+    end
+    -- info string: `sh`, `{bash}`, `{.bash}`; anything unparsed counts as not shell
+    local info = vim.trim(line(open):match('^%s*[`~]+(.*)'))
+    local lang = info:gsub('^{%.?', ''):match('^[%w-]*'):lower()
+    if lang == '' and info ~= '' then lang = info end
+    if not shell_langs[lang] then vim.notify('shrepl: not a shell block (' .. lang .. ')', vim.log.levels.WARN); return end
+    if close - open < 2 then vim.notify('shrepl: empty block', vim.log.levels.WARN); return end
+    return open + 1, close - 1, #line(open):match('^%s*') -- body is dedented by the fence's indent
+  end,
   buffer = function() return 0, api.nvim_buf_line_count(0) - 1 end,
   selection = function()
     local s, e = vim.fn.line('v') - 1, vim.fn.line('.') - 1
@@ -204,7 +243,10 @@ function M.setup(opts)
   local function map(mode, lhs, fn, desc)
     if lhs then vim.keymap.set(mode, lhs, fn, { desc = 'shrepl: ' .. desc }) end
   end
-  local run = function(range) return function() M.eval(0, M.ranges[range]()) end end
+  local run = function(range) return function()
+    local s, e, dedent = M.ranges[range]()
+    if s then M.eval(0, s, e, dedent) end
+  end end
   map('n', m.eval_command, run('command'), 'eval command (follows \\ continuations)')
   map('n', m.eval_block, run('block'), 'eval block (blank-line delimited)')
   map('n', m.eval_buffer, run('buffer'), 'eval buffer')
