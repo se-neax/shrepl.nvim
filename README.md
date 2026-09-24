@@ -22,6 +22,10 @@ Every line you run gets a sign in the sign column: `·` while it runs, then `✓
 so halfway through a runbook you can see which steps you already did. `:ShreplClear!`
 wipes them.
 
+While a command runs, its line shows how long it has been going and the latest line of
+output (`… 14s · Waiting for stack update`), so a slow `aws` call doesn't look frozen.
+Commands you fired while another was still running wait their turn and say `… queued`.
+
 A short result goes inline: `=> first line of output` in a muted color, with `…+N` when
 there's more, or `✗ <exit code>` in red when the command fails. Longer output also opens
 in a float under the command you ran, so it doesn't cover the code, and it closes when you

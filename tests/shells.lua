@@ -18,7 +18,7 @@ local function result(cmd)
   assert(vim.wait(5000, function()
     local m = api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })[1]
     text = m and m[4].virt_text[1][1]
-    return text and text ~= '… running'
+    return text and not text:match('^…')
   end, 20), 'timeout: ' .. cmd)
   return text
 end

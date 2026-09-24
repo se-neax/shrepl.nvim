@@ -102,7 +102,8 @@ end
 -- don't interleave their transcripts
 local function header(e)
   if e.logged then return end
-  e.logged = true
+  e.logged, e.t0 = true, vim.uv.hrtime() -- the eval starts running now
+  if e.buf then mark(e, '… running', 'Comment') end
   append({ '# ── ' .. os.date('%H:%M:%S') }); append(e.code)
 end
 
@@ -164,6 +165,21 @@ local function shell_cmd()
   end
   local known = shells[vim.fs.basename(sh[1])]
   return sh, known and known.rc
+end
+
+-- once a second: the running eval's mark shows elapsed time and its latest output line
+local ticker
+local function tick()
+  local e = queue[1]
+  if not e then ticker:stop(); return end
+  if e.internal or not e.buf then return end
+  local secs = math.floor((vim.uv.hrtime() - e.t0) / 1e9)
+  local tail = e.out[#e.out] and (' · ' .. vim.fn.strcharpart(vim.trim(e.out[#e.out]), 0, 60)) or ''
+  mark(e, ('… %ds%s'):format(secs, tail), 'Comment')
+end
+local function start_ticker()
+  ticker = ticker or vim.uv.new_timer()
+  if not ticker:is_active() then ticker:start(1000, 1000, vim.schedule_wrap(tick)) end
 end
 
 local dispatch
@@ -276,9 +292,10 @@ function M.eval(buf, s, e, dedent)
   end
   api.nvim_buf_clear_namespace(buf, ns, s, e + 1)
   api.nvim_buf_clear_namespace(buf, sign_ns, s, e + 1)
-  mark(ev, '… running', 'Comment')
-  sign(ev, 'running')
   table.insert(queue, ev)
+  mark(ev, #queue == 1 and '… running' or '… queued', 'Comment')
+  sign(ev, 'running')
+  start_ticker()
   if #queue == 1 then header(ev) end
   dispatch(ev)
 end

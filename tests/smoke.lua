@@ -28,7 +28,7 @@ local function eval_cursor(row, range)
   shrepl.eval(buf, shrepl.ranges[range or 'command']())
 end
 local function wait_for(row)
-  assert(vim.wait(5000, function() local t = mark_at(row); return t and t ~= '… running' end, 20), 'timeout on row ' .. row)
+  assert(vim.wait(5000, function() local t = mark_at(row); return t and not t:match('^…') end, 20), 'timeout on row ' .. row)
   return mark_at(row)
 end
 local function eq(want, got, what) assert(got == want, ('%s: want %q, got %q'):format(what, want, got)) end
