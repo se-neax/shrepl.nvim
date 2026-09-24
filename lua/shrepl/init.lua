@@ -26,6 +26,7 @@ M.config = {
     restart = '<localleader>eR',
     clear = '<localleader>ec',
     open_last = '<localleader>eo',
+    show_env = '<localleader>ev',
     log_split = '<localleader>ls',
     log_vsplit = '<localleader>lv',
   },
@@ -104,14 +105,15 @@ local function header(e)
   if e.logged then return end
   e.logged, e.t0 = true, vim.uv.hrtime() -- the eval starts running now
   if e.buf then mark(e, '… running', 'Comment') end
-  append({ '# ── ' .. os.date('%H:%M:%S') }); append(e.code)
+  if not e.quiet then append({ '# ── ' .. os.date('%H:%M:%S') }); append(e.code) end
 end
 
 local function push(e, l)
   header(e)
-  for _ = 1, e.blanks do table.insert(e.out, ''); append({ '' }) end
+  for _ = 1, e.blanks do table.insert(e.out, ''); if not e.quiet then append({ '' }) end end
   e.blanks = 0
-  table.insert(e.out, l); append({ l })
+  table.insert(e.out, l)
+  if not e.quiet then append({ l }) end
 end
 
 local function finish(rc)
@@ -119,7 +121,8 @@ local function finish(rc)
   if not e then return end
   header(e)
   e.blanks = 0 -- trailing blank lines (incl. the sentinel printf's \n) are dropped
-  append({ ('# => exit %d  (%.1fs)'):format(rc, (vim.uv.hrtime() - e.t0) / 1e9), '' })
+  if not e.quiet then append({ ('# => exit %d  (%.1fs)'):format(rc, (vim.uv.hrtime() - e.t0) / 1e9), '' }) end
+  if e.on_done then e.on_done(e.out, rc) end
   if e.internal then return end
   last = e.out
   local more = #e.out > 1 and ('  …+%d'):format(#e.out - 1) or ''
@@ -182,11 +185,48 @@ local function start_ticker()
   if not ticker:is_active() then ticker:start(1000, 1000, vim.schedule_wrap(tick)) end
 end
 
-local dispatch
+local dispatch, shell_name, baseline
+
+-- run code the user didn't write (rc file, env snapshots); never marks a buffer
+local function internal(code, opts)
+  local ev = vim.tbl_extend('force', { code = { code }, out = {}, blanks = 0, t0 = vim.uv.hrtime(), internal = true }, opts or {})
+  table.insert(queue, ev)
+  if #queue == 1 then header(ev) end
+  dispatch(ev)
+end
+
+-- variables that change on their own or belong to the shell, never interesting in a diff
+local noise = {}
+for n in ([[_ RANDOM SRANDOM SECONDS LINENO EPOCHSECONDS EPOCHREALTIME BASH_COMMAND BASH_LINENO
+  BASH_SOURCE BASH_ARGC BASH_ARGV BASH_REMATCH FUNCNAME PIPESTATUS BASHPID HISTCMD COLUMNS LINES PWD
+  OLDPWD pipestatus status ERRNO TTYIDLE funcstack funcfiletrace funcsourcetrace functrace
+  zsh_eval_context ZSH_EVAL_CONTEXT ZSH_SUBSHELL]]):gmatch('%S+') do noise[n] = true end
+
+-- `declare -p` / `typeset -p` output -> { name = definition }
+local function parse_vars(lines)
+  local vars, name = {}, nil
+  for _, l in ipairs(lines) do
+    local words, n = vim.split(l, ' ', { trimempty = true }), nil
+    if vim.tbl_contains({ 'declare', 'typeset', 'export', 'readonly', 'local' }, words[1]) then
+      for i = 2, #words do
+        if not words[i]:match('^[-+]') then n = words[i]:match('^([%w_]+)'); break end
+      end
+    end
+    if n then name = n; vars[name] = l
+    elseif name then vars[name] = vars[name] .. '\n' .. l end
+  end
+  for k in pairs(vars) do if noise[k] or k:match('^__shrepl') then vars[k] = nil end end
+  return vars
+end
+
+-- builtin: a user function or alias named declare/typeset/pwd must not answer instead
+local function dump_cmd() return shell_name == 'zsh' and 'builtin typeset -p' or 'builtin declare -p' end
+
 local function ensure()
   if job then return end
   partial = ''
   local argv, rc = shell_cmd()
+  shell_name, baseline = vim.fs.basename(argv[1]), nil
   job = vim.fn.jobstart(argv, {
     env = M.config.env,
     on_stdout = on_out,
@@ -197,12 +237,8 @@ local function ensure()
       append({ '# shell exited, next eval starts a fresh one', '' })
     end),
   })
-  if M.config.rc and rc then
-    local ev = { code = { rc }, out = {}, blanks = 0, t0 = vim.uv.hrtime(), internal = true }
-    table.insert(queue, ev)
-    header(ev)
-    dispatch(ev)
-  end
+  if M.config.rc and rc then internal(rc) end
+  internal(dump_cmd(), { quiet = true, on_done = function(out) baseline = parse_vars(out) end })
 end
 
 -- the base64 wrapper works unchanged in bash and zsh
@@ -292,8 +328,9 @@ function M.eval(buf, s, e, dedent)
   end
   api.nvim_buf_clear_namespace(buf, ns, s, e + 1)
   api.nvim_buf_clear_namespace(buf, sign_ns, s, e + 1)
+  local waiting = vim.iter(queue):any(function(q) return not q.internal end)
   table.insert(queue, ev)
-  mark(ev, #queue == 1 and '… running' or '… queued', 'Comment')
+  mark(ev, waiting and '… queued' or '… running', 'Comment')
   sign(ev, 'running')
   start_ticker()
   if #queue == 1 then header(ev) end
@@ -384,6 +421,27 @@ function M.toggle_log(cmd)
   api.nvim_set_current_win(cur)
 end
 
+--- Working directory plus variables set, changed or unset since the shell started.
+function M.show_env()
+  if not job then return vim.notify('shrepl: no shell running yet', vim.log.levels.INFO) end
+  internal('builtin pwd; ' .. dump_cmd(), { quiet = true, on_done = function(out)
+    local now = parse_vars(vim.list_slice(out, 2))
+    local lines = { '# shrepl env (' .. shell_name .. ')', 'cwd  ' .. (out[1] or '?'), '' }
+    local names = vim.tbl_keys(vim.tbl_extend('force', {}, baseline or {}, now))
+    table.sort(names)
+    for _, n in ipairs(names) do
+      local was, is = (baseline or {})[n], now[n]
+      if not was then table.insert(lines, '+ ' .. is)
+      elseif not is then table.insert(lines, '- ' .. n .. '  (unset)')
+      elseif was ~= is then table.insert(lines, '~ ' .. is) end
+    end
+    if #lines == 3 then table.insert(lines, '(nothing set or changed since the shell started)') end
+    vim.cmd('botright new')
+    api.nvim_buf_set_lines(0, 0, -1, false, vim.iter(lines):map(function(l) return vim.split(l, '\n') end):flatten():totable())
+    vim.bo.buftype, vim.bo.bufhidden, vim.bo.filetype = 'nofile', 'wipe', 'sh'
+  end })
+end
+
 --- The last result in a scratch split: search, fold, :%!jq, yank.
 function M.open_last()
   vim.cmd('botright new')
@@ -418,6 +476,7 @@ function M.setup(opts)
   map('n', m.restart, M.restart, 'restart shell')
   map('n', m.clear, M.clear, 'clear inline results')
   map('n', m.open_last, M.open_last, 'open last result')
+  map('n', m.show_env, M.show_env, 'show cwd and variables set this session')
   map('n', m.log_split, function() M.toggle_log(M.config.log.split) end, 'toggle log (split)')
   map('n', m.log_vsplit, function() M.toggle_log(M.config.log.vsplit) end, 'toggle log (vsplit)')
 end

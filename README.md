@@ -35,6 +35,17 @@ For really long output (an `aws ... list-*` call can easily return 16,000 lines)
 `<localleader>eo` opens the last result in a scratch split. JSON gets `filetype=json`, so
 you can fold it, search it, or cut it down with `:%!jq '.Items[].id'`.
 
+Lost track of what the shell is holding? `<localleader>ev` (`:ShreplEnv`) opens the
+working directory and every variable you set, changed (`~`) or unset (`-`) since the shell
+started, as the shell's own `declare -p` / `typeset -p` lines:
+
+```
+cwd  /tmp
+
++ declare -x AWS_PROFILE="staging"
++ declare -- B="my-bucket"
+```
+
 Everything also goes to a log (`<localleader>ls`): each eval's code, its full output, the
 exit code and how long it took, in the order you ran them. The log never truncates.
 
@@ -83,6 +94,7 @@ use { 'se-neax/shrepl.nvim', config = function() require('shrepl').setup() end }
 | `<localleader>eb` | Eval the whole buffer                                   |
 | `<localleader>E`  | Eval the visual selection                               |
 | `<localleader>eo` | Open the last result in a scratch split                 |
+| `<localleader>ev` | Show the working directory and variables set this session |
 | `<localleader>ls` | Toggle the log in a horizontal split                    |
 | `<localleader>lv` | Toggle the log in a vertical split                      |
 | `<localleader>ei` | Interrupt the running command                           |
@@ -104,7 +116,7 @@ require('shrepl').setup({
 ```
 
 The same actions exist as commands, with no setup needed: `:ShreplEval` (takes a range),
-`:ShreplLog`, `:ShreplLast`, `:ShreplInterrupt`, `:ShreplRestart`, `:ShreplClear` (`!` also clears the signs).
+`:ShreplLog`, `:ShreplLast`, `:ShreplEnv`, `:ShreplInterrupt`, `:ShreplRestart`, `:ShreplClear` (`!` also clears the signs).
 
 ## Configuration
 
