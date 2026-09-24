@@ -48,7 +48,8 @@ confirm   Before running, every logical line (`\` continuations joined) is
 3. MAPPINGS                                                 *shrepl-mappings*
 
   Key                 Option            Action ~
-  <localleader>ee     eval_command      current line, plus `\` continuations
+  <localleader>ee     eval_command      current line, plus following lines while
+                                        a line ends in `\`, `|`, `||` or `&&`
   <localleader>er     eval_block        lines around cursor up to blank lines,
                                         or the whole fenced block (see below)
   <localleader>eb     eval_buffer       whole buffer

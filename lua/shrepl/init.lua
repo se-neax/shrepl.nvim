@@ -233,6 +233,14 @@ local function around(ext) -- grow from the cursor row while ext(row) holds
   return s, e
 end
 
+-- a line ending in \, |, || or && carries on to the next one; an escaped \| or an
+-- operator inside a trailing comment does not
+local function continues(l)
+  if l:match('^%s*#') then return false end
+  l = l:gsub('%s#[^\'"]*$', '')
+  return (l:match('\\%s*$') or l:match('[^\\]|%s*$') or l:match('&&%s*$')) ~= nil
+end
+
 local shell_langs = { [''] = true, sh = true, bash = true, shell = true, zsh = true, console = true }
 
 -- Markdown fence (``` or ~~~) containing the cursor row, delimiter lines included:
@@ -254,7 +262,7 @@ local function fence()
 end
 
 M.ranges = {
-  command = function() return around(function(i) return line(i):match('\\%s*$') end) end,
+  command = function() return around(function(i) return continues(line(i)) end) end,
   block = function()
     local open, close = fence()
     if not open then -- blank-line delimited; fence lines count as delimiters too

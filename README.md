@@ -5,7 +5,8 @@ Evaluate shell commands from any Neovim buffer, the way Conjure evaluates Clojur
 ![shrepl.nvim demo](demo/demo.gif)
 
 Put the cursor on a line, press `<localleader>ee`, and the result shows up at the end of
-that line. The shell behind it stays alive between evals. If one line sets `B=my-bucket`,
+that line. A line ending in `\`, `|`, `&&` or `||` pulls in the next one, so a pipeline
+split over three lines runs as one command. The shell behind it stays alive between evals. If one line sets `B=my-bucket`,
 `aws s3 ls s3://$B` three lines further down still sees it, and a `cd`, a function or an
 `export` sticks around the same way.
 
@@ -68,7 +69,7 @@ use { 'se-neax/shrepl.nvim', config = function() require('shrepl').setup() end }
 
 | Key               | Action                                                  |
 |-------------------|---------------------------------------------------------|
-| `<localleader>ee` | Eval the current command, following `\` continuations   |
+| `<localleader>ee` | Eval the current command, across `\` `|` `&&` `||` line ends |
 | `<localleader>er` | Eval the block around the cursor, or the fenced block   |
 | `<localleader>eb` | Eval the whole buffer                                   |
 | `<localleader>E`  | Eval the visual selection                               |
