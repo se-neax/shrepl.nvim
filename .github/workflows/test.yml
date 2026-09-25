@@ -8,6 +8,7 @@ jobs:
         nvim: [v0.10.4, stable, nightly]
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get install -y zsh
       - uses: rhysd/action-setup-vim@v1
         with:
           neovim: true

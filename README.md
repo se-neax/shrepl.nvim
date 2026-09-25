@@ -5,7 +5,8 @@ Evaluate shell commands from any Neovim buffer, the way Conjure evaluates Clojur
 ![shrepl.nvim demo](demo/demo.gif)
 
 Put the cursor on a line, press `<localleader>ee`, and the result shows up at the end of
-that line. The shell behind it stays alive between evals. If one line sets `B=my-bucket`,
+that line. A line ending in `\`, `|`, `&&` or `||` pulls in the next one, so a pipeline
+split over three lines runs as one command. The shell behind it stays alive between evals. If one line sets `B=my-bucket`,
 `aws s3 ls s3://$B` three lines further down still sees it, and a `cd`, a function or an
 `export` sticks around the same way.
 
@@ -16,6 +17,15 @@ command.
 
 ## What it does
 
+Every line you run gets a sign in the sign column: `·` while it runs, then `✓` or a red
+`✗`. The signs stay when you clear the inline results and move with the text as you edit,
+so halfway through a runbook you can see which steps you already did. `:ShreplClear!`
+wipes them.
+
+While a command runs, its line shows how long it has been going and the latest line of
+output (`… 14s · Waiting for stack update`), so a slow `aws` call doesn't look frozen.
+Commands you fired while another was still running wait their turn and say `… queued`.
+
 A short result goes inline: `=> first line of output` in a muted color, with `…+N` when
 there's more, or `✗ <exit code>` in red when the command fails. Longer output also opens
 in a float under the command you ran, so it doesn't cover the code, and it closes when you
@@ -25,12 +35,30 @@ For really long output (an `aws ... list-*` call can easily return 16,000 lines)
 `<localleader>eo` opens the last result in a scratch split. JSON gets `filetype=json`, so
 you can fold it, search it, or cut it down with `:%!jq '.Items[].id'`.
 
+Lost track of what the shell is holding? `<localleader>ev` (`:ShreplEnv`) opens the
+working directory and every variable you set, changed (`~`) or unset (`-`) since the shell
+started, as the shell's own `declare -p` / `typeset -p` lines:
+
+```
+cwd  /tmp
+
++ declare -x AWS_PROFILE="staging"
++ declare -- B="my-bucket"
+```
+
 Everything also goes to a log (`<localleader>ls`): each eval's code, its full output, the
 exit code and how long it took, in the order you ran them. The log never truncates.
 
 A broken command only breaks itself. An unclosed quote or a syntax error fails that one
 eval and the shell carries on. If something hangs, `<localleader>ei` interrupts it and
 your variables survive.
+
+Commands that look like they change things ask first: `rm`, `aws … delete-*/put-*/create-*`
+and friends, `aws s3 rm/sync/mv` or a `cp` to `s3://`, `kubectl delete/apply`,
+`terraform apply/destroy`, `git push --force`, `git reset --hard`, `DROP TABLE`,
+`DELETE FROM`, `dd … of=`. It's pattern matching on the text you evaluate, so it catches
+the typo'd line in a runbook, not a script that deletes things on its own. Add your own
+with `confirm = { add = { '%f[%w]deploy%.sh' } }`, or turn it off with `confirm = false`.
 
 Pagers are switched off (`PAGER`, `GIT_PAGER` and `AWS_PAGER`), because a command waiting
 for you to press `q` in an invisible pager just looks like a hang.
@@ -42,7 +70,7 @@ block, blank lines included. That happens when the fence is marked `sh`, `bash`,
 
 ## Install
 
-Requires Neovim 0.10+, `bash`, `base64` and `pkill` (coreutils and procps, present on
+Requires Neovim 0.10+, `bash` (or `zsh`), `base64` and `pkill` (coreutils and procps, present on
 most systems).
 
 lazy.nvim:
@@ -61,11 +89,12 @@ use { 'se-neax/shrepl.nvim', config = function() require('shrepl').setup() end }
 
 | Key               | Action                                                  |
 |-------------------|---------------------------------------------------------|
-| `<localleader>ee` | Eval the current command, following `\` continuations   |
+| `<localleader>ee` | Eval the current command, across `\` `|` `&&` `||` line ends |
 | `<localleader>er` | Eval the block around the cursor, or the fenced block   |
 | `<localleader>eb` | Eval the whole buffer                                   |
 | `<localleader>E`  | Eval the visual selection                               |
 | `<localleader>eo` | Open the last result in a scratch split                 |
+| `<localleader>ev` | Show the working directory and variables set this session |
 | `<localleader>ls` | Toggle the log in a horizontal split                    |
 | `<localleader>lv` | Toggle the log in a vertical split                      |
 | `<localleader>ei` | Interrupt the running command                           |
@@ -87,7 +116,7 @@ require('shrepl').setup({
 ```
 
 The same actions exist as commands, with no setup needed: `:ShreplEval` (takes a range),
-`:ShreplLog`, `:ShreplLast`, `:ShreplInterrupt`, `:ShreplRestart`, `:ShreplClear`.
+`:ShreplLog`, `:ShreplLast`, `:ShreplEnv`, `:ShreplInterrupt`, `:ShreplRestart`, `:ShreplClear` (`!` also clears the signs).
 
 ## Configuration
 
@@ -95,18 +124,24 @@ Defaults:
 
 ```lua
 require('shrepl').setup({
-  shell = { 'bash', '--norc', '--noprofile' },
+  shell = 'bash', -- 'zsh', 'auto' ($SHELL if bash/zsh), or an argv list
+  rc = false,     -- true: source ~/.bashrc / ~/.zshrc at start (aliases, functions)
   env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb', NO_COLOR = '1' },
   float = { max_height = 20, max_width = 140, border = 'rounded' },
+  signs = { running = '·', ok = '✓', fail = '✗' }, -- or false
   log = { split = 'botright 15split', vsplit = 'botright vsplit' },
+  confirm = { add = {} }, -- or { patterns = { ... } } to replace the defaults, or false
 })
 ```
 
-Drop `--norc` from `shell` if you want your aliases.
+`shell = 'zsh', rc = true` gets you your aliases and functions from `~/.zshrc`. The rc
+file is sourced once when the shell starts and shows up in the log like any other eval.
+bash works the same way, but many `~/.bashrc` files return early when the shell isn't
+interactive, so the aliases may never get defined.
 
 ## How it works
 
-One `bash` runs as a Neovim job with plain pipes, no terminal. Each eval is sent as
+One shell (bash by default) runs as a Neovim job with plain pipes, no terminal. Each eval is sent as
 
 ```sh
 eval "$(printf %s <base64 of your code> | base64 -d)" </dev/null 2>&1
@@ -125,7 +160,7 @@ waiting.
   `:terminal` for those.
 - Output arrives line by line, so a progress bar that redraws with `\r` shows up only
   once it prints a newline.
-- It only speaks bash for now.
+- bash and zsh only. fish uses different syntax for the wrapper and isn't supported.
 
 ## Related
 

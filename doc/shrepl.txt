@@ -12,7 +12,7 @@ CONTENTS                                                    *shrepl-contents*
 ==============================================================================
 1. INTRO                                                       *shrepl-intro*
 
-shrepl keeps one bash process alive per Neovim session and sends it the
+shrepl keeps one shell process alive per Neovim session and sends it the
 command under your cursor. Variables, functions and the working directory
 survive between evaluations. The result appears at the end of the evaluated
 line (`=> output`, or `✗ <exit code>` in red), longer output opens in a
@@ -25,25 +25,40 @@ Works in any buffer: a shell script, a Markdown runbook, a scratch buffer.
 
 >lua
   require('shrepl').setup({
-    shell = { 'bash', '--norc', '--noprofile' },
+    shell = 'bash',   -- 'zsh', 'auto' ($SHELL if bash or zsh), or argv list
+    rc = false,       -- source ~/.bashrc or ${ZDOTDIR:-~}/.zshrc at start
     env = { PAGER = 'cat', GIT_PAGER = 'cat', AWS_PAGER = '', TERM = 'dumb' },
     float = { max_height = 20, max_width = 140, border = 'rounded' },
+    signs = { running = '·', ok = '✓', fail = '✗' }, -- or false
     log = { split = 'botright 15split', vsplit = 'botright vsplit' },
     mappings = { eval_command = '<localleader>ee' }, -- see below; false disables
   })
 <
 The commands in |shrepl-commands| work without calling setup().
 
+                                                              *shrepl-confirm*
+confirm   Before running, every logical line (`\` continuations joined) is
+          lowercased and checked against `confirm.patterns` (defaults in
+          `require('shrepl').default_confirm`) plus `confirm.add`. Entries are
+          Lua patterns or functions `fn(line) -> bool`. A hit shows the line
+          and asks; Cancel marks it `⊘ not run`. `patterns` replaces the
+          defaults, `add` extends them, `confirm = false` disables the check.
+          It is a guardrail for runbooks, not a sandbox: variables, aliases
+          and scripts can still do anything.
+
 ==============================================================================
 3. MAPPINGS                                                 *shrepl-mappings*
 
   Key                 Option            Action ~
-  <localleader>ee     eval_command      current line, plus `\` continuations
+  <localleader>ee     eval_command      current line, plus following lines while
+                                        a line ends in `\`, `|`, `||` or `&&`
   <localleader>er     eval_block        lines around cursor up to blank lines,
                                         or the whole fenced block (see below)
   <localleader>eb     eval_buffer       whole buffer
   <localleader>E      eval_selection    visual selection
   <localleader>eo     open_last         last result in a scratch split
+  <localleader>ev     show_env          cwd + variables set/changed/unset since
+                                        the shell started (|:ShreplEnv|)
   <localleader>ls     log_split         toggle log (horizontal)
   <localleader>lv     log_vsplit        toggle log (vertical)
   <localleader>ei     interrupt         SIGINT the running command
@@ -65,15 +80,18 @@ block.
   :ShreplLast           open the last result in a scratch split
   :ShreplInterrupt      SIGINT the running command
   :ShreplRestart        restart the shell
-  :ShreplClear          clear inline results in the current buffer
+  :ShreplClear[!]       clear inline results in the current buffer; with !
+                        also the ✓/✗ signs showing which lines already ran
 
 ==============================================================================
 5. CAVEATS                                                   *shrepl-caveats*
 
 - stdin is /dev/null, so interactive programs (prompts, less, top) won't
   work. Use |:terminal| for those.
-- The shell starts with --norc: your aliases aren't there, PATH and the
-  environment are inherited from Neovim.
+- The shell starts without rc files (bash --norc, zsh -f) unless rc = true.
+  PATH and the environment are inherited from Neovim. Many ~/.bashrc files
+  return early in non-interactive shells, so rc = true helps most with zsh.
+- bash and zsh only.
 - Output is collected line by line; carriage-return progress bars show up
   once they print a newline.
 
