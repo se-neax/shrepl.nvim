@@ -35,7 +35,10 @@ your variables survive.
 Pagers are switched off (`PAGER`, `GIT_PAGER` and `AWS_PAGER`), because a command waiting
 for you to press `q` in an invisible pager just looks like a hang.
 
-It works in any buffer, whatever the filetype.
+It works in any buffer, whatever the filetype. In Markdown, `<localleader>er` inside a
+fenced block (```` ``` ```` or `~~~`, also when indented under a list item) runs the whole
+block, blank lines included. That happens when the fence is marked `sh`, `bash`, `shell`,
+`zsh`, `console` (or `{bash}`) or has no language; a `python` block is left alone.
 
 ## Install
 
@@ -59,7 +62,7 @@ use { 'se-neax/shrepl.nvim', config = function() require('shrepl').setup() end }
 | Key               | Action                                                  |
 |-------------------|---------------------------------------------------------|
 | `<localleader>ee` | Eval the current command, following `\` continuations   |
-| `<localleader>er` | Eval the block around the cursor (up to blank lines)    |
+| `<localleader>er` | Eval the block around the cursor, or the fenced block   |
 | `<localleader>eb` | Eval the whole buffer                                   |
 | `<localleader>E`  | Eval the visual selection                               |
 | `<localleader>eo` | Open the last result in a scratch split                 |

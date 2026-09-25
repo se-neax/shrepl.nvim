@@ -39,7 +39,8 @@ The commands in |shrepl-commands| work without calling setup().
 
   Key                 Option            Action ~
   <localleader>ee     eval_command      current line, plus `\` continuations
-  <localleader>er     eval_block        lines around cursor up to blank lines
+  <localleader>er     eval_block        lines around cursor up to blank lines,
+                                        or the whole fenced block (see below)
   <localleader>eb     eval_buffer       whole buffer
   <localleader>E      eval_selection    visual selection
   <localleader>eo     open_last         last result in a scratch split
@@ -48,6 +49,13 @@ The commands in |shrepl-commands| work without calling setup().
   <localleader>ei     interrupt         SIGINT the running command
   <localleader>eR     restart           kill the shell; next eval starts fresh
   <localleader>ec     clear             clear inline results
+
+                                                              *shrepl-fences*
+Inside a Markdown fence (``` or ~~~), eval_block runs the fence body, blank
+lines included, with the fence's own indentation removed. Fences tagged sh,
+bash, shell, zsh, console ({bash} and {.bash} too) or untagged count as shell;
+other languages are refused with a warning. Outside fences, fence lines end a
+block.
 
 ==============================================================================
 4. COMMANDS                                                 *shrepl-commands*
