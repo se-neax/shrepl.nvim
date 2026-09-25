@@ -57,6 +57,8 @@ confirm   Before running, every logical line (`\` continuations joined) is
   <localleader>eb     eval_buffer       whole buffer
   <localleader>E      eval_selection    visual selection
   <localleader>eo     open_last         last result in a scratch split
+  <localleader>ev     show_env          cwd + variables set/changed/unset since
+                                        the shell started (|:ShreplEnv|)
   <localleader>ls     log_split         toggle log (horizontal)
   <localleader>lv     log_vsplit        toggle log (vertical)
   <localleader>ei     interrupt         SIGINT the running command
